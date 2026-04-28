@@ -1,0 +1,47 @@
+<template>
+    <!-- Hidden iframe: runs OCR in a Visualforce page (no LWS restrictions) -->
+    <iframe src={ocrIframeUrl} class="ocr-frame" onload={handleIframeLoad}></iframe>
+
+    <lightning-card title={componentTitle}>
+        <div class="slds-p-around_medium">
+            <lightning-input
+                type="file"
+                label={componentTitle}
+                accept={acceptedFormats}
+                onchange={handleFileChange}>
+            </lightning-input>
+
+            <template if:true={imagePreviewUrl}>
+                <div class="slds-m-top_small slds-m-bottom_small">
+                    <p class="slds-text-title_caps slds-m-bottom_xx-small">Preview</p>
+                    <img src={imagePreviewUrl} alt="Uploaded image preview" class="preview-image" />
+                </div>
+            </template>
+
+            <template if:true={fileName}>
+                <p class="slds-m-top_x-small slds-text-body_small">
+                    <lightning-icon icon-name="doctype:attachment" size="xx-small"></lightning-icon>
+                    {fileName}
+                </p>
+            </template>
+
+            <template if:true={loading}>
+                <lightning-spinner alternative-text="Processing" size="small" class="slds-m-top_small"></lightning-spinner>
+                <p class="slds-m-top_small">{progressText}</p>
+            </template>
+
+            <template if:true={hasDocument}>
+                <div class="slds-m-top_small slds-text-align_right">
+                    <lightning-button-icon
+                        icon-name="utility:delete"
+                        alternative-text="Delete document"
+                        title="Delete document"
+                        size="small"
+                        onclick={handleDeleteDocument}
+                        disabled={loading}>
+                    </lightning-button-icon>
+                </div>
+            </template>
+        </div>
+    </lightning-card>
+</template>

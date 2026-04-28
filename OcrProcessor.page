@@ -1,0 +1,103 @@
+<apex:page showHeader="false" sidebar="false" standardStylesheets="false"
+           applyBodyTag="false" applyHtmlTag="false" docType="html-5.0">
+<html>
+<head><meta charset="utf-8"/></head>
+<body>
+<script src="{!URLFOR($Resource.tesseract)}"></script>
+<script src="{!URLFOR($Resource.pdfjsWorker)}"></script>
+<script src="{!URLFOR($Resource.pdfjs)}"></script>
+<script>
+(function () {
+    'use strict';
+
+    /* ---- resolve libraries (patched UMD writes both places) ---- */
+    var Tess = window.Tesseract || document.__tesseractLib;
+    var pdfjs = window.pdfjsLib || document.__pdfjsLib;
+
+    var tessWorker = null;
+
+    function send(data) {
+        if (window.parent !== window) {
+            window.parent.postMessage(data, '*');
+        }
+    }
+
+    /* ---- lazy-init the Tesseract worker (reused across calls) ---- */
+    /* No workerPath/corePath overrides: v2.1.5 uses its built-in CDN
+       defaults (unpkg.com). VF pages have no LWS so this works. */
+    async function initWorker() {
+        if (tessWorker) return tessWorker;
+        tessWorker = Tess.createWorker({
+            logger: function (m) {
+                send({ type: 'ocrProgress', status: m.status, progress: m.progress || 0 });
+            }
+        });
+        await tessWorker.load();
+        await tessWorker.loadLanguage('eng');
+        await tessWorker.initialize('eng');
+        return tessWorker;
+    }
+
+    /* ---- image OCR ---- */
+    async function processImage(dataUrl) {
+        var w = await initWorker();
+        var result = await w.recognize(dataUrl);
+        return result.data.text;
+    }
+
+    /* ---- PDF OCR (render each page then OCR) ---- */
+    async function processPdf(arrayBuf) {
+        if (!pdfjs) throw new Error('pdf.js not available');
+        if (pdfjs.GlobalWorkerOptions) pdfjs.GlobalWorkerOptions.workerSrc = '';
+
+        var pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuf) }).promise;
+        var w   = await initWorker();
+        var allText = '';
+
+        for (var p = 1; p <= pdf.numPages; p++) {
+            send({ type: 'ocrProgress', status: 'Page ' + p + '/' + pdf.numPages, progress: p / pdf.numPages });
+            var page     = await pdf.getPage(p);
+            var viewport = page.getViewport({ scale: 2 });
+            var canvas   = document.createElement('canvas');
+            var ctx      = canvas.getContext('2d');
+            canvas.width  = viewport.width;
+            canvas.height = viewport.height;
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            var imgData = canvas.toDataURL('image/png');
+            var result  = await w.recognize(imgData);
+            allText += '\n--- Page ' + p + ' ---\n' + result.data.text;
+        }
+        return allText;
+    }
+
+    /* ---- message handler ---- */
+    window.addEventListener('message', async function (event) {
+        var msg = event.data;
+        if (!msg || !msg.type) return;
+
+        if (msg.type === 'ocrImage') {
+            try {
+                var text = await processImage(msg.data);
+                send({ type: 'ocrResult', text: text });
+            } catch (err) {
+                send({ type: 'ocrError', error: err.message || String(err) });
+            }
+        } else if (msg.type === 'ocrPdf') {
+            try {
+                var text = await processPdf(msg.data);
+                send({ type: 'ocrResult', text: text });
+            } catch (err) {
+                send({ type: 'ocrError', error: err.message || String(err) });
+            }
+        }
+    });
+
+    /* ---- signal parent that we are ready ---- */
+    send({ type: 'ocrReady' });
+    console.log('[OCR-VF] Processor ready. Tesseract:', !!Tess, 'pdfjs:', !!pdfjs);
+})();
+</script>
+</body>
+</html>
+</apex:page>
